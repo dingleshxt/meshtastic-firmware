@@ -25,6 +25,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #include "configuration.h"
 #if HAS_SCREEN
 #include <OLEDDisplay.h>
+#include "u8g2utils.h"
 
 #include "DisplayFormatters.h"
 #if !MESHTASTIC_EXCLUDE_GPS
@@ -1019,8 +1020,53 @@ static void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state
         display->drawXbm(x + (SCREEN_WIDTH - heart_width) / 2,
                          y + (SCREEN_HEIGHT - FONT_HEIGHT_MEDIUM - heart_height) / 2 + 2 + 5, heart_width, heart_height, heart);
     } else {
-        snprintf(tempBuf, sizeof(tempBuf), "%s", mp.decoded.payload.bytes);
-        display->drawStringMaxWidth(0 + x, 0 + y + FONT_HEIGHT_SMALL, x + display->getWidth(), tempBuf);
+            u8g2_t u8g2mock;
+            u8g2_SetupBuffer_Utf8(&u8g2mock, &u8g2_cb_r0);
+            u8g2_InitDisplay(&u8g2mock);
+            u8g2_SetPowerSave(&u8g2mock, 0);  
+            u8g2_ClearBuffer(&u8g2mock);
+            u8g2_SetFont(&u8g2mock, u8g2_font_wqy12_t_gb2312);
+
+            snprintf(tempBuf, sizeof(tempBuf), "%s", mp.decoded.payload.bytes);
+            static char tmpmsg[300];
+            memset(tmpmsg, 0, 300);
+            size_t utf8len = 0;
+            size_t tmpmsg_i = 0;
+            // splite lines
+            for (size_t tmpBuf_i=0;tmpBuf_i<strlen(tempBuf); tmpBuf_i++){
+                if ((tempBuf[tmpBuf_i] & 0xC0) != 0x80){
+                    utf8len++;
+                }
+                tmpmsg[tmpmsg_i] = tempBuf[tmpBuf_i];
+                if (utf8len>(128/u8g2_GetMaxCharWidth(&u8g2mock))) {
+                    utf8len = 1;
+                    tmpmsg[tmpmsg_i] = '\n';
+                    tmpmsg_i++;
+                    tmpmsg[tmpmsg_i] = tempBuf[tmpBuf_i];
+                }
+                tmpmsg_i++;
+            }
+            tmpmsg[tmpmsg_i] = '\n';
+
+            // using u8g2 to draw buffer
+            uint8_t yy = 0;
+            for( int i = 0; i < u8x8_GetStringLineCnt(tmpmsg) && i < 3; i++ )
+            {
+                u8g2_DrawUTF8(&u8g2mock, 0 + x, y + yy + FONT_HEIGHT_SMALL + u8g2_GetMaxCharHeight(&u8g2mock) ,u8x8_GetStringLineStart(i, tmpmsg));
+                yy+=u8g2_GetMaxCharHeight(&u8g2mock);
+            }
+            u8g2_SendBuffer(&u8g2mock);
+
+            // mask u8g2 buffer to display buffer
+            for( y = 0; y < 64; y++)
+            {
+                for( x = 0; x < 128; x++)
+                {
+                    if (ch_bitmap[y][x]){
+                    display->buffer[y/8*128 + x] = bit_set(display->buffer[y/8*128 + x],y%8);
+                    }
+                }
+            }
     }
 #else
     snprintf(tempBuf, sizeof(tempBuf), "%s", mp.decoded.payload.bytes);
